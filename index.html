@@ -1,0 +1,128 @@
+<!doctype html>
+<!--
+Copyright (c) 2015, Brandon Jones.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+-->
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+    <title>WebGL 2 Crowds</title>
+
+    <style>
+      #webgl-canvas {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        left: 0;
+        top: 0;
+        margin: 0;
+      }
+    </style>
+
+    <script src="js/gl-matrix-min.js"></script>
+
+    <script src="js/wglu/wglu-camera.js"></script>
+    <script src="js/wglu/wglu-program.js"></script>
+    <script src="js/wglu/wglu-texture.js"></script>
+    <script src="js/wglu/wglu-url.js"></script>
+
+    <script src="js/animation.js"></script>
+    <script src="js/skinned-model.js"></script>
+
+  </head>
+  <body>
+    <canvas id="webgl-canvas"></canvas>
+    <script>
+      var webglCanvas = document.getElementById("webgl-canvas");
+      var gl = webglCanvas.getContext("webgl2");
+      if (!gl) {
+        console.error("No WebGL 2 support.");
+      }
+
+      gl.clearColor(0.1, 0.2, 0.3, 1.0);
+      gl.clearDepth(1.0);
+      gl.enable(gl.DEPTH_TEST);
+      gl.enable(gl.CULL_FACE);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+      var projMat = mat4.create();
+      var modelMat = mat4.create();
+
+      var camera = new WGLUCamera.OrbitCamera(webglCanvas);
+      camera.maxDistance = 25;
+      camera.minDistance = 2;
+      camera.minOrbitX = 0;
+      camera.distanceStep = 0.01;
+      camera.setDistance(4);
+      camera.setCenter([0, 0, 1]);
+
+      function onResize() {
+        webglCanvas.width = webglCanvas.offsetWidth * window.devicePixelRatio;
+        webglCanvas.height = webglCanvas.offsetHeight * window.devicePixelRatio;
+        gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
+        mat4.perspective(projMat, 45, webglCanvas.width/webglCanvas.height, 1.0, 4096.0);
+      }
+      window.addEventListener('resize', onResize, false);
+      onResize();
+
+      var model = new SkinnedModel(gl);
+      var skeletons = [];
+      model.load("media/models/main_player_lorez", function(model) {
+        for(var i = 0; i < 3; ++i) {
+          skeletons.push(model.skeleton.clone());
+        }
+      });
+      
+      var anim = new SkeletalAnimation();
+      anim.load("media/animations/run_forward", function(anim) {
+          // Simple hack to get the animation to play
+          var frameId = 0;
+          var frameTime = 1000 / anim.frameRate;
+          setInterval(function() {
+              if(self.model.complete) {
+                  for(var i = 0; i < skeletons.length; ++i) {
+                    anim.evaluate((frameId + i*3) % anim.frameCount, skeletons[i]);
+                  }
+                  frameId++;
+              }
+          }, frameTime);
+      });
+
+      function onAnimationFrame(t) {
+        camera.update(t);
+        window.requestAnimationFrame(onAnimationFrame);
+
+        gl.clear(gl.COLOR_BUFFER_BIT || gl.DEPTH_BUFFER_BIT);
+
+        var viewMat = this.camera.getViewMat();
+
+        mat4.identity(modelMat);
+        mat4.translate(modelMat, modelMat, [-1.0, 0.0, 0.0]);
+        for(var i = 0; i < skeletons.length; ++i) {
+          model.draw(modelMat, viewMat, projMat, skeletons[i]);
+          mat4.translate(modelMat, modelMat, [1.0, 0.0, 0.0]);
+        }
+      }
+      window.requestAnimationFrame(onAnimationFrame);
+    </script>
+  </body>
+</html>
