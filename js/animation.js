@@ -44,6 +44,7 @@ var SkeletalAnimation = (function () {
       // TODO: Error Catch!
       var anim = JSON.parse(this.responseText);
       self._parseAnim(anim);
+      self.complete = true;
       if (callback) { callback(self); }
     };
     animXhr.send(null);

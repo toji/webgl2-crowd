@@ -26,8 +26,72 @@ var SkinnedModel = (function() {
   
   var MAX_BONES_PER_MESH = 50;
 
+  var skinMeshSource = [
+    "in vec3 weights;",
+    "in vec3 bones;",
+
+    "uniform mat4 boneMat[" + MAX_BONES_PER_MESH + "];",
+
+    // A "manual" rotation matrix transpose to get the normal matrix
+    "mat3 getNormalMat(mat4 mat) {",
+    "   return mat3(mat[0][0], mat[1][0], mat[2][0], mat[0][1], mat[1][1], mat[2][1], mat[0][2], mat[1][2], mat[2][2]);",
+    "}",
+
+    "mat4 accumulateSkinMat() {",
+    "   mat4 result = weights.x * boneMat[int(bones.x)];",
+    "   result = result + weights.y * boneMat[int(bones.y)];",
+    "   result = result + weights.z * boneMat[int(bones.z)];",
+    "   return result;",
+    "}",
+
+    "void skinVertices(vec3 position, vec3 normal, out vec4 skinnedPosition, out vec3 skinnedNormal) {",
+    "   mat4 skinMat = accumulateSkinMat();",
+    "   mat3 normalMat = getNormalMat(skinMat);",
+    "   skinnedPosition = skinMat * vec4(position, 1.0);",
+    "   skinnedNormal = normalize(normal * normalMat);",
+    "}"
+  ].join("\n");
+
   // Skinned Model Shader
   var skinnedModelVS = [
+    "#version 300 es",
+    "uniform vec3 lightDirection;",
+
+    "out vec3 vLightToPoint;",
+    "out vec3 vEyeToPoint;",
+
+    "void setupLight(vec3 worldPosition) {",
+    "   vLightToPoint = lightDirection;",
+    "   vEyeToPoint = -worldPosition;",
+    "}",
+
+    skinMeshSource,
+
+    "in vec3 position;",
+    "in vec2 texture;",
+    "in vec3 normal;",
+
+    "uniform mat4 viewMat;",
+    "uniform mat4 modelMat;",
+    "uniform mat4 projectionMat;",
+    
+    "out vec2 vTexture;",
+    "out vec3 vNormal;",
+
+    "void main(void) {",
+    "   vTexture = texture;",
+
+    "   vec4 vPosition;",
+    "   skinVertices(position, normal, vPosition, vNormal);",
+    "   vPosition = modelMat * vPosition;",
+    "   setupLight(vPosition.xyz);",
+
+    "   gl_Position = projectionMat * viewMat * vPosition;",
+    "}"
+  ].join("\n");
+
+  // Baked Model Shader
+  var bakedModelVS = [
     "#version 300 es",
     "uniform vec3 lightDirection;",
 
@@ -42,43 +106,26 @@ var SkinnedModel = (function() {
     "in vec3 position;",
     "in vec2 texture;",
     "in vec3 normal;",
-    "in vec3 weights;",
-    "in vec3 bones;",
 
     "uniform mat4 viewMat;",
     "uniform mat4 modelMat;",
     "uniform mat4 projectionMat;",
-    "uniform mat4 boneMat[" + MAX_BONES_PER_MESH + "];",
     
     "out vec2 vTexture;",
     "out vec3 vNormal;",
-    
-    "mat4 accumulateSkinMat() {",
-    "   mat4 result = weights.x * boneMat[int(bones.x)];",
-    "   result = result + weights.y * boneMat[int(bones.y)];",
-    "   result = result + weights.z * boneMat[int(bones.z)];",
-    "   return result;",
-    "}",
-    
-    // A "manual" rotation matrix transpose to get the normal matrix
-    "mat3 getNormalMat(mat4 mat) {",
-    "   return mat3(mat[0][0], mat[1][0], mat[2][0], mat[0][1], mat[1][1], mat[2][1], mat[0][2], mat[1][2], mat[2][2]);",
-    "}",
 
     "void main(void) {",
-    "   mat4 skinMat = modelMat * accumulateSkinMat();",
-    "   mat3 normalMat = getNormalMat(skinMat);",
-    
-    "   vec4 vPosition = skinMat * vec4(position, 1.0);",
-    "   gl_Position = projectionMat * viewMat * vPosition;",
-
     "   vTexture = texture;",
-    "   vNormal = normalize(normal * normalMat);",
+    "   vNormal = normalize(normal);",
+
+    "   vec4 vPosition = modelMat * vec4(position, 1.0);",
+    "   gl_Position = projectionMat * viewMat * vPosition;",
     "   setupLight(vPosition.xyz);",
     "}"
   ].join("\n");
 
-  var skinnedModelFS = [
+  // Fragment shader for both skinned and baked rendering
+  var renderModelFS = [
     "#version 300 es",
     "precision highp float;",
 
@@ -123,6 +170,33 @@ var SkinnedModel = (function() {
     "   finalColor += diffuseColor.rgb * lightValue;",
     "   fragColor = vec4(finalColor, 1.0);",
     "}"
+  ].join("\n");
+
+  // Shader that bakes the models skin
+  var bakeSkinVS = [
+    "#version 300 es",
+
+    skinMeshSource,
+
+    "in vec3 position;",
+    "in vec3 normal;",
+    
+    "out vec3 vPosition;",
+    "out vec3 vNormal;",
+
+    "void main(void) {",
+    "   vec4 skinnedPosition;",
+    //"   vec3 vNormal;",
+    "   skinVertices(position, normal, skinnedPosition, vNormal);",
+    "   vPosition = skinnedPosition.xyz;",
+    "}"
+  ].join("\n");
+
+  var stubFS = [
+    "#version 300 es",
+    "precision highp float;",
+    "out vec4 fragColor;",
+    "void main(void) { fragColor = vec4(1.0, 0.0, 0.0, 1.0); }"
   ].join("\n");
 
   // Vertex Format Flags
@@ -190,6 +264,9 @@ var SkinnedModel = (function() {
   };
 
   Skeleton.prototype.getBoneMatrices = function(offset, count) {
+    if (!offset) { offset = 0; }
+    if (!count) { count = this.bones.length - offset; }
+
     if(this._dirtyBones) {
       for(var i = 0; i < this.bones.length; ++i) {
         var bone = this.bones[i];
@@ -201,7 +278,7 @@ var SkinnedModel = (function() {
     return this.boneMatrices.subarray(offset * 16, (offset + count) * 16);
   };
 
-  Skeleton.prototype.clone = function(offset, count) {
+  Skeleton.prototype.clone = function() {
     var i, srcBone, destBone;
     var out = new Skeleton();
 
@@ -228,12 +305,14 @@ var SkinnedModel = (function() {
     this.vertexFormat = 0;
     this.vertexStride = 0;
     this.vertexBuffer = null;
+    this.vertexCount = 0;
     this.indexBuffer = null;
     this.vao = null;
     this.meshes = null;
     this.complete = false;
     this.skeleton = null;
     this.program = null;
+    this.bakeProgram = null;
     this._textureLoader = new WGLUTextureLoader(gl);
   };
 
@@ -279,7 +358,7 @@ var SkinnedModel = (function() {
     if (!this.program) {
       this.program = new WGLUProgram(gl);
       this.program.attachShaderSource(skinnedModelVS, gl.VERTEX_SHADER);
-      this.program.attachShaderSource(skinnedModelFS, gl.FRAGMENT_SHADER);
+      this.program.attachShaderSource(renderModelFS, gl.FRAGMENT_SHADER);
       this.program.bindAttribLocation(ModelVertexAttribs);
       this.program.link();
     }
@@ -326,6 +405,7 @@ var SkinnedModel = (function() {
     var vertHeader = new Uint32Array(buffer, offset, 2);
     this.vertexFormat = vertHeader[0];
     this.vertexStride = vertHeader[1];
+    this.vertexCount = Math.floor((length - 8) / this.vertexStride);
 
     return new Uint8Array(buffer, offset + 8, length - 8);
   };
@@ -381,6 +461,22 @@ var SkinnedModel = (function() {
     }
   };
 
+  SkinnedModel.prototype.createBakedModel = function () {
+    if (!this.complete) { return null; }
+
+    if (!this.bakeProgram) {
+      var gl = this.gl;
+      this.bakeProgram = new WGLUProgram(gl);
+      this.bakeProgram.attachShaderSource(bakeSkinVS, gl.VERTEX_SHADER);
+      this.bakeProgram.attachShaderSource(stubFS, gl.FRAGMENT_SHADER);
+      this.bakeProgram.bindAttribLocation(ModelVertexAttribs);
+      this.bakeProgram.transformFeedbackVaryings(["vPosition", "vNormal"], gl.INTERLEAVED_ATTRIBS);
+      this.bakeProgram.link();
+    }
+
+    return new BakedModel(this);
+  };
+
   SkinnedModel.prototype.draw = function (modelMat, viewMat, projectionMat, skeleton) {
     if (!this.complete) { return; }
 
@@ -424,6 +520,118 @@ var SkinnedModel = (function() {
         gl.drawElements(gl.TRIANGLES, submesh.indexCount, gl.UNSIGNED_SHORT, submesh.indexOffset*2);
       }
     }
+
+    gl.bindVertexArray(null);
+  };
+
+  var BakedModel = function(skinnedModel) {
+    this.gl = skinnedModel.gl;
+    var gl = this.gl;
+    this.skinnedModel = skinnedModel;
+    this.vertexStride = Float32Array.BYTES_PER_ELEMENT * 6;
+
+    // Set up vertex buffers
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+
+    gl.enableVertexAttribArray(ModelVertexAttribs.position);
+    gl.enableVertexAttribArray(ModelVertexAttribs.texture);
+    gl.enableVertexAttribArray(ModelVertexAttribs.normal);
+
+    this.vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, skinnedModel.vertexCount * this.vertexStride, gl.STATIC_DRAW);
+
+    gl.vertexAttribPointer(ModelVertexAttribs.position, 3, gl.FLOAT, false, this.vertexStride, 0);
+    gl.vertexAttribPointer(ModelVertexAttribs.normal, 3, gl.FLOAT, false, this.vertexStride, 12);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, skinnedModel.vertexBuffer);
+    gl.vertexAttribPointer(ModelVertexAttribs.texture, 2, gl.FLOAT, false, skinnedModel.vertexStride, 12);
+    //gl.vertexAttribPointer(ModelVertexAttribs.normal, 3, gl.FLOAT, false, skinnedModel.vertexStride, 20);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, skinnedModel.indexBuffer);
+
+    gl.bindVertexArray(null);
+
+    // Create transform feedback object used for baking
+    this.transformFeedback = gl.createTransformFeedback();
+
+    // Create program (TODO: Doesn't need to be created once per model)
+    this.program = new WGLUProgram(gl);
+    this.program.attachShaderSource(bakedModelVS, gl.VERTEX_SHADER);
+    this.program.attachShaderSource(renderModelFS, gl.FRAGMENT_SHADER);
+    this.program.bindAttribLocation(ModelVertexAttribs);
+    this.program.link();
+  };
+
+  BakedModel.prototype.bake = function(skeleton) {
+    if (!skeleton) {
+      skeleton = this.skinnedModel.skeleton;
+    }
+
+    var gl = this.gl;
+    var program = this.skinnedModel.bakeProgram;
+    var i, j, boneSet;
+
+    program.use();
+
+    // Bind the vertex/index buffers
+    gl.bindVertexArray(this.skinnedModel.vao);
+
+    boneSet = skeleton.getBoneMatrices();
+    gl.uniformMatrix4fv(program.uniform.boneMat, false, boneSet);
+
+    gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.transformFeedback);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.vertexBuffer);
+    gl.enable(gl.RASTERIZER_DISCARD);
+    gl.beginTransformFeedback(gl.POINTS);
+    
+    gl.drawArrays(gl.POINTS, 0, this.skinnedModel.vertexCount);
+
+    gl.endTransformFeedback();
+    gl.disable(gl.RASTERIZER_DISCARD);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+    gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
+
+    gl.bindVertexArray(null);
+  };
+
+  BakedModel.prototype.draw = function (modelMat, viewMat, projectionMat) {
+    var gl = this.gl;
+    var program = this.program;
+    var i, j,
+        mesh, submesh,
+        indexOffset, indexCount;
+
+    program.use();
+
+    gl.uniform3f(program.uniform.lightDirection, 1.0, -1.0, 1.0);
+    gl.uniform3f(program.uniform.lightColor, 1.0, 1.0, 1.0);
+    gl.uniform3f(program.uniform.ambient, 0.25, 0.25, 0.25);
+
+    gl.uniformMatrix4fv(program.uniform.viewMat, false, viewMat);
+    gl.uniformMatrix4fv(program.uniform.modelMat, false, modelMat);
+    gl.uniformMatrix4fv(program.uniform.projectionMat, false, projectionMat);
+
+    // Bind the vertex/index buffers
+    gl.bindVertexArray(this.vao);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(program.uniform.diffuse, 0);
+
+    for (i in this.skinnedModel.meshes) {
+      mesh = this.skinnedModel.meshes[i];
+      
+      gl.bindTexture(gl.TEXTURE_2D, mesh.diffuse);
+      
+      for (j in mesh.submeshes) {
+        submesh = mesh.submeshes[j];
+        
+        gl.drawElements(gl.TRIANGLES, submesh.indexCount, gl.UNSIGNED_SHORT, submesh.indexOffset*2);
+      }
+    }
+
+    gl.bindVertexArray(null);
   };
 
   return SkinnedModel;

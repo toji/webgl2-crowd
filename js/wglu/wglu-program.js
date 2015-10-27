@@ -117,6 +117,10 @@ var WGLUProgram = (function() {
     }
   }
 
+  Program.prototype.transformFeedbackVaryings = function(varyings, type) {
+    gl.transformFeedbackVaryings(this.program, varyings, type);
+  }
+
   Program.prototype.link = function() {
     this.gl.linkProgram(this.program);
   }

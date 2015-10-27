@@ -38,7 +38,8 @@ THE SOFTWARE.
       }
     </style>
 
-    <script src="js/gl-matrix-min.js"></script>
+    <script src="js/third-party/gl-matrix-min.js"></script>
+    <script src="js/third-party/stats.min.js"></script>
 
     <script src="js/wglu/wglu-camera.js"></script>
     <script src="js/wglu/wglu-program.js"></script>
@@ -47,11 +48,15 @@ THE SOFTWARE.
 
     <script src="js/animation.js"></script>
     <script src="js/skinned-model.js"></script>
-
   </head>
   <body>
     <canvas id="webgl-canvas"></canvas>
     <script>
+      var stats = new Stats();
+      document.body.appendChild( stats.domElement );
+
+      var skinMode = WGLUUrl.getInt("skinMode", 0);
+
       var webglCanvas = document.getElementById("webgl-canvas");
       var gl = webglCanvas.getContext("webgl2");
       if (!gl) {
@@ -72,7 +77,7 @@ THE SOFTWARE.
       camera.minDistance = 2;
       camera.minOrbitX = 0;
       camera.distanceStep = 0.01;
-      camera.setDistance(4);
+      camera.setDistance(10);
       camera.setCenter([0, 0, 1]);
 
       function onResize() {
@@ -86,41 +91,78 @@ THE SOFTWARE.
 
       var model = new SkinnedModel(gl);
       var skeletons = [];
+      var bakedModels = [];
       model.load("media/models/main_player_lorez", function(model) {
         for(var i = 0; i < 3; ++i) {
           skeletons.push(model.skeleton.clone());
+          bakedModels.push(model.createBakedModel());
         }
       });
       
       var anim = new SkeletalAnimation();
-      anim.load("media/animations/run_forward", function(anim) {
-          // Simple hack to get the animation to play
-          var frameId = 0;
-          var frameTime = 1000 / anim.frameRate;
-          setInterval(function() {
-              if(self.model.complete) {
-                  for(var i = 0; i < skeletons.length; ++i) {
-                    anim.evaluate((frameId + i*3) % anim.frameCount, skeletons[i]);
-                  }
-                  frameId++;
-              }
-          }, frameTime);
-      });
+      var animationStart = 0;
+      anim.load("media/animations/run_forward");
+
+      var instanceRows = 25;
+      var instanceColumns = 25;
+      var instanceOffsets = [];
+      for (var y = 0; y < instanceRows; ++y) {
+        for (var x = 0; x < instanceColumns; ++x) {
+          var px = x - (instanceColumns / 2.0) + (Math.random() * 0.5);
+          var py = y - (instanceRows / 2.0) + (Math.random() * 0.5);
+          instanceOffsets.push(vec3.fromValues(px, py, 0.0));
+        }
+      }
 
       function onAnimationFrame(t) {
-        camera.update(t);
         window.requestAnimationFrame(onAnimationFrame);
+        stats.begin();
 
         gl.clear(gl.COLOR_BUFFER_BIT || gl.DEPTH_BUFFER_BIT);
 
-        var viewMat = this.camera.getViewMat();
+        camera.update(t);
 
-        mat4.identity(modelMat);
-        mat4.translate(modelMat, modelMat, [-1.0, 0.0, 0.0]);
-        for(var i = 0; i < skeletons.length; ++i) {
-          model.draw(modelMat, viewMat, projMat, skeletons[i]);
-          mat4.translate(modelMat, modelMat, [1.0, 0.0, 0.0]);
+        if(model.complete) {
+          if (anim.complete) {
+            if (animationStart == 0) {
+              animationStart = t;
+            }
+
+            var frameTime = 1000 / anim.frameRate;
+            var frameId = (t - animationStart) / frameTime;
+            while (frameId >= anim.frameCount) {
+              frameId -= anim.frameCount;
+              animationStart += frameTime * anim.frameCount;
+            }
+
+            frameId = Math.floor(frameId);
+
+            // Update the animations
+            for(var i = 0; i < skeletons.length; ++i) {
+              anim.evaluate((frameId + i*3) % anim.frameCount, skeletons[i]);
+            }
+          }
+
+          var viewMat = this.camera.getViewMat();
+
+          if (skinMode == 1) {
+            for(var i = 0; i < skeletons.length; ++i) {
+              bakedModels[i].bake(skeletons[i]);
+            }
+          }
+
+          for(var i = 0; i < instanceOffsets.length; ++i) {
+            mat4.identity(modelMat);
+            mat4.translate(modelMat, modelMat, instanceOffsets[i]);
+            if (skinMode == 0) {
+              model.draw(modelMat, viewMat, projMat, skeletons[i % skeletons.length]);
+            } else {
+              bakedModels[i % skeletons.length].draw(modelMat, viewMat, projMat);
+            }
+          }
         }
+
+        stats.end();
       }
       window.requestAnimationFrame(onAnimationFrame);
     </script>
