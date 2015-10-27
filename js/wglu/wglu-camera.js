@@ -208,13 +208,6 @@ var WGLUCamera = (function () {
     this._dirty = true;
   };
 
-  OrbitCamera.prototype.setCenter = function (value) {
-    this._center[0] = -value[0];
-    this._center[1] = -value[1];
-    this._center[2] = -value[2];
-    this._dirty = true;
-  };
-
   OrbitCamera.prototype.getViewMat = function () {
     if (this._dirty) {
       var mv = this._viewMat;

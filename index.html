@@ -52,10 +52,14 @@ THE SOFTWARE.
   <body>
     <canvas id="webgl-canvas"></canvas>
     <script>
+      var skinMode = WGLUUrl.getInt("skinMode", 0);
+      var instanceMode = WGLUUrl.getInt("instanceMode", 0);
+      var instanceRows = WGLUUrl.getInt("instanceRows", 25);
+      var instanceColumns = WGLUUrl.getInt("instanceColumns", 25);
+      var variantCount = WGLUUrl.getInt("variantCount", 3);
+
       var stats = new Stats();
       document.body.appendChild( stats.domElement );
-
-      var skinMode = WGLUUrl.getInt("skinMode", 0);
 
       var webglCanvas = document.getElementById("webgl-canvas");
       var gl = webglCanvas.getContext("webgl2");
@@ -77,8 +81,9 @@ THE SOFTWARE.
       camera.minDistance = 2;
       camera.minOrbitX = 0;
       camera.distanceStep = 0.01;
-      camera.setDistance(10);
+      camera.setDistance(15);
       camera.setCenter([0, 0, 1]);
+      camera.orbit(-0.2, 0.3);
 
       function onResize() {
         webglCanvas.width = webglCanvas.offsetWidth * window.devicePixelRatio;
@@ -89,30 +94,47 @@ THE SOFTWARE.
       window.addEventListener('resize', onResize, false);
       onResize();
 
+      var variants = [];
+
       var model = new SkinnedModel(gl);
-      var skeletons = [];
-      var bakedModels = [];
       model.load("media/models/main_player_lorez", function(model) {
-        for(var i = 0; i < 3; ++i) {
-          skeletons.push(model.skeleton.clone());
-          bakedModels.push(model.createBakedModel());
+        for(var i = 0; i < variantCount; ++i) {
+          variants.push({
+            skeleton: model.skeleton.clone(),
+            bakedModel: model.createBakedModel(),
+            offsets: [],
+            offsetBuffer: null
+          });
+        }
+
+        for (var y = 0; y < instanceRows; ++y) {
+          for (var x = 0; x < instanceColumns; ++x) {
+            var variant = variants[Math.floor(Math.random() * 3.0)];
+            var px = x - (instanceColumns / 2.0) + (Math.random() * 0.5);
+            var py = y - (instanceRows / 2.0) + (Math.random() * 0.5);
+            variant.offsets.push(vec3.fromValues(px, py, 0.0));
+          }
+        }
+
+        for(var i = 0; i < variantCount; ++i) {
+          var variant = variants[i];
+          var offsets = variant.offsets;
+          var offsetArray = new Float32Array(offsets.length * 3);
+          for (var j = 0; j < offsets.length; ++j) {
+            offsetArray[j * 3] = offsets[j][0];
+            offsetArray[(j * 3) + 1] = offsets[j][1];
+            offsetArray[(j * 3) + 2] = offsets[j][2];
+          }
+
+          variant.offsetBuffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, variant.offsetBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, offsetArray, gl.STATIC_DRAW);
         }
       });
       
       var anim = new SkeletalAnimation();
       var animationStart = 0;
       anim.load("media/animations/run_forward");
-
-      var instanceRows = 25;
-      var instanceColumns = 25;
-      var instanceOffsets = [];
-      for (var y = 0; y < instanceRows; ++y) {
-        for (var x = 0; x < instanceColumns; ++x) {
-          var px = x - (instanceColumns / 2.0) + (Math.random() * 0.5);
-          var py = y - (instanceRows / 2.0) + (Math.random() * 0.5);
-          instanceOffsets.push(vec3.fromValues(px, py, 0.0));
-        }
-      }
 
       function onAnimationFrame(t) {
         window.requestAnimationFrame(onAnimationFrame);
@@ -122,7 +144,7 @@ THE SOFTWARE.
 
         camera.update(t);
 
-        if(model.complete) {
+        if (model.complete) {
           if (anim.complete) {
             if (animationStart == 0) {
               animationStart = t;
@@ -138,26 +160,38 @@ THE SOFTWARE.
             frameId = Math.floor(frameId);
 
             // Update the animations
-            for(var i = 0; i < skeletons.length; ++i) {
-              anim.evaluate((frameId + i*3) % anim.frameCount, skeletons[i]);
+            for (var i = 0; i < variants.length; ++i) {
+              anim.evaluate((frameId + i*3) % anim.frameCount, variants[i].skeleton);
             }
           }
 
           var viewMat = this.camera.getViewMat();
 
           if (skinMode == 1) {
-            for(var i = 0; i < skeletons.length; ++i) {
-              bakedModels[i].bake(skeletons[i]);
+            for (var i = 0; i < variants.length; ++i) {
+              variants[i].bakedModel.bake(variants[i].skeleton);
             }
           }
 
-          for(var i = 0; i < instanceOffsets.length; ++i) {
-            mat4.identity(modelMat);
-            mat4.translate(modelMat, modelMat, instanceOffsets[i]);
-            if (skinMode == 0) {
-              model.draw(modelMat, viewMat, projMat, skeletons[i % skeletons.length]);
+          for (var i = 0; i < variants.length; ++i) {
+            var variant = variants[i];
+            if (instanceMode == 1) {
+              mat4.identity(modelMat);
+              if (skinMode == 0) {
+                model.drawInstanced(modelMat, viewMat, projMat, variant.skeleton, variant.offsetBuffer, variant.offsets.length);
+              } else {
+                variant.bakedModel.drawInstanced(modelMat, viewMat, projMat, variant.offsetBuffer, variant.offsets.length);
+              }
             } else {
-              bakedModels[i % skeletons.length].draw(modelMat, viewMat, projMat);
+              for (var j = 0; j < variant.offsets.length; ++j) {
+                mat4.identity(modelMat);
+                mat4.translate(modelMat, modelMat, variant.offsets[j]);
+                if (skinMode == 0) {
+                  model.draw(modelMat, viewMat, projMat, variant.skeleton);
+                } else {
+                  variant.bakedModel.draw(modelMat, viewMat, projMat);
+                }
+              }
             }
           }
         }

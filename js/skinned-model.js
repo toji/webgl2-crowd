@@ -70,6 +70,7 @@ var SkinnedModel = (function() {
     "in vec3 position;",
     "in vec2 texture;",
     "in vec3 normal;",
+    "in vec3 offset;",
 
     "uniform mat4 viewMat;",
     "uniform mat4 modelMat;",
@@ -83,6 +84,7 @@ var SkinnedModel = (function() {
 
     "   vec4 vPosition;",
     "   skinVertices(position, normal, vPosition, vNormal);",
+    "   vPosition = vPosition + vec4(offset, 0.0);",
     "   vPosition = modelMat * vPosition;",
     "   setupLight(vPosition.xyz);",
 
@@ -106,6 +108,7 @@ var SkinnedModel = (function() {
     "in vec3 position;",
     "in vec2 texture;",
     "in vec3 normal;",
+    "in vec3 offset;",
 
     "uniform mat4 viewMat;",
     "uniform mat4 modelMat;",
@@ -118,7 +121,7 @@ var SkinnedModel = (function() {
     "   vTexture = texture;",
     "   vNormal = normalize(normal);",
 
-    "   vec4 vPosition = modelMat * vec4(position, 1.0);",
+    "   vec4 vPosition = modelMat * vec4(position + offset, 1.0);",
     "   gl_Position = projectionMat * viewMat * vPosition;",
     "   setupLight(vPosition.xyz);",
     "}"
@@ -216,6 +219,7 @@ var SkinnedModel = (function() {
     normal: 2,
     weights: 3,
     bones: 4,
+    offset: 5,
   };
 
   function GetLumpId(id) {
@@ -503,6 +507,8 @@ var SkinnedModel = (function() {
     // Bind the vertex/index buffers
     gl.bindVertexArray(this.vao);
 
+    gl.disableVertexAttribArray(ModelVertexAttribs.offset);
+
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(program.uniform.diffuse, 0);
 
@@ -518,6 +524,58 @@ var SkinnedModel = (function() {
         gl.uniformMatrix4fv(program.uniform.boneMat, false, boneSet);
         
         gl.drawElements(gl.TRIANGLES, submesh.indexCount, gl.UNSIGNED_SHORT, submesh.indexOffset*2);
+      }
+    }
+
+    gl.bindVertexArray(null);
+  };
+
+  SkinnedModel.prototype.drawInstanced = function (modelMat, viewMat, projectionMat, skeleton, offsetBuffer, count) {
+    if (!this.complete) { return; }
+
+    if (!skeleton) {
+      skeleton = this.skeleton;
+    }
+
+    var gl = this.gl;
+    var program = this.program;
+    var i, j,
+        mesh, submesh, boneSet,
+        indexOffset, indexCount;
+
+    program.use();
+
+    gl.uniform3f(program.uniform.lightDirection, 1.0, -1.0, 1.0);
+    gl.uniform3f(program.uniform.lightColor, 1.0, 1.0, 1.0);
+    gl.uniform3f(program.uniform.ambient, 0.25, 0.25, 0.25);
+
+    gl.uniformMatrix4fv(program.uniform.viewMat, false, viewMat);
+    gl.uniformMatrix4fv(program.uniform.modelMat, false, modelMat);
+    gl.uniformMatrix4fv(program.uniform.projectionMat, false, projectionMat);
+
+    // Bind the vertex/index buffers
+    gl.bindVertexArray(this.vao);
+
+    gl.enableVertexAttribArray(ModelVertexAttribs.offset);
+    gl.bindBuffer(gl.ARRAY_BUFFER, offsetBuffer);
+    gl.vertexAttribPointer(ModelVertexAttribs.offset, 3, gl.FLOAT, false, 12, 0);
+    gl.vertexAttribDivisor(ModelVertexAttribs.offset, 1);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(program.uniform.diffuse, 0);
+
+    for (i in this.meshes) {
+      mesh = this.meshes[i];
+      
+      gl.bindTexture(gl.TEXTURE_2D, mesh.diffuse);
+      
+      for (j in mesh.submeshes) {
+        submesh = mesh.submeshes[j];
+        
+        boneSet = skeleton.getBoneMatrices(submesh.boneOffset, submesh.boneCount);
+        gl.uniformMatrix4fv(program.uniform.boneMat, false, boneSet);
+        
+        gl.drawElementsInstanced(gl.TRIANGLES, submesh.indexCount, gl.UNSIGNED_SHORT, submesh.indexOffset*2, count);
       }
     }
 
@@ -616,6 +674,8 @@ var SkinnedModel = (function() {
     // Bind the vertex/index buffers
     gl.bindVertexArray(this.vao);
 
+    gl.disableVertexAttribArray(ModelVertexAttribs.offset);
+
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(program.uniform.diffuse, 0);
 
@@ -628,6 +688,49 @@ var SkinnedModel = (function() {
         submesh = mesh.submeshes[j];
         
         gl.drawElements(gl.TRIANGLES, submesh.indexCount, gl.UNSIGNED_SHORT, submesh.indexOffset*2);
+      }
+    }
+
+    gl.bindVertexArray(null);
+  };
+
+  BakedModel.prototype.drawInstanced = function (modelMat, viewMat, projectionMat, offsetBuffer, count) {
+    var gl = this.gl;
+    var program = this.program;
+    var i, j,
+        mesh, submesh,
+        indexOffset, indexCount;
+
+    program.use();
+
+    gl.uniform3f(program.uniform.lightDirection, 1.0, -1.0, 1.0);
+    gl.uniform3f(program.uniform.lightColor, 1.0, 1.0, 1.0);
+    gl.uniform3f(program.uniform.ambient, 0.25, 0.25, 0.25);
+
+    gl.uniformMatrix4fv(program.uniform.viewMat, false, viewMat);
+    gl.uniformMatrix4fv(program.uniform.modelMat, false, modelMat);
+    gl.uniformMatrix4fv(program.uniform.projectionMat, false, projectionMat);
+
+    // Bind the vertex/index buffers
+    gl.bindVertexArray(this.vao);
+
+    gl.enableVertexAttribArray(ModelVertexAttribs.offset);
+    gl.bindBuffer(gl.ARRAY_BUFFER, offsetBuffer);
+    gl.vertexAttribPointer(ModelVertexAttribs.offset, 3, gl.FLOAT, false, 12, 0);
+    gl.vertexAttribDivisor(ModelVertexAttribs.offset, 1);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(program.uniform.diffuse, 0);
+
+    for (i in this.skinnedModel.meshes) {
+      mesh = this.skinnedModel.meshes[i];
+      
+      gl.bindTexture(gl.TEXTURE_2D, mesh.diffuse);
+      
+      for (j in mesh.submeshes) {
+        submesh = mesh.submeshes[j];
+        
+        gl.drawElementsInstanced(gl.TRIANGLES, submesh.indexCount, gl.UNSIGNED_SHORT, submesh.indexOffset*2, count);
       }
     }
 
