@@ -65,9 +65,19 @@ var WGLUUrl = (function() {
     return defaultValue;
   }
 
+  function getBool(name, defaultValue) {
+    ensureArgsCached();
+    var lcaseName = name.toLowerCase();
+    if (lcaseName in urlArgs) {
+      return parseInt(urlArgs[lcaseName], 10) != 0;
+    }
+    return defaultValue;
+  }
+
   return {
     getString: getString,
     getInt: getInt,
-    getFloat: getFloat
+    getFloat: getFloat,
+    getBool: getBool
   };
 })();

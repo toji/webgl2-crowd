@@ -38,6 +38,7 @@ THE SOFTWARE.
       }
     </style>
 
+    <script src="js/third-party/dat.gui.min.js"></script>
     <script src="js/third-party/gl-matrix-min.js"></script>
     <script src="js/third-party/stats.min.js"></script>
 
@@ -52,11 +53,15 @@ THE SOFTWARE.
   <body>
     <canvas id="webgl-canvas"></canvas>
     <script>
-      var skinMode = WGLUUrl.getInt("skinMode", 0);
-      var instanceMode = WGLUUrl.getInt("instanceMode", 0);
-      var instanceRows = WGLUUrl.getInt("instanceRows", 25);
-      var instanceColumns = WGLUUrl.getInt("instanceColumns", 25);
-      var variantCount = WGLUUrl.getInt("variantCount", 3);
+      var AppSettings = function() {
+        this.useTransformFeedback = WGLUUrl.getBool("useTransformFeedback", true);
+        this.useInstancing = WGLUUrl.getBool("useInstancing", true);
+        this.instanceRows = WGLUUrl.getInt("instanceRows", 25);
+        this.instanceColumns = WGLUUrl.getInt("instanceColumns", 25);
+        this.variantCount = WGLUUrl.getInt("variantCount", 3);
+      };
+
+      var settings = new AppSettings();
 
       var stats = new Stats();
       document.body.appendChild( stats.domElement );
@@ -94,11 +99,12 @@ THE SOFTWARE.
       window.addEventListener('resize', onResize, false);
       onResize();
 
+      var model = new SkinnedModel(gl);
       var variants = [];
 
-      var model = new SkinnedModel(gl);
-      model.load("media/models/main_player_lorez", function(model) {
-        for(var i = 0; i < variantCount; ++i) {
+      function resetInstances() {
+        variants = [];
+        for(var i = 0; i < settings.variantCount; ++i) {
           variants.push({
             skeleton: model.skeleton.clone(),
             bakedModel: model.createBakedModel(),
@@ -107,16 +113,16 @@ THE SOFTWARE.
           });
         }
 
-        for (var y = 0; y < instanceRows; ++y) {
-          for (var x = 0; x < instanceColumns; ++x) {
-            var variant = variants[Math.floor(Math.random() * 3.0)];
-            var px = x - (instanceColumns / 2.0) + (Math.random() * 0.5);
-            var py = y - (instanceRows / 2.0) + (Math.random() * 0.5);
+        for (var y = 0; y < settings.instanceRows; ++y) {
+          for (var x = 0; x < settings.instanceColumns; ++x) {
+            var variant = variants[Math.floor(Math.random() * settings.variantCount)];
+            var px = x - (settings.instanceColumns / 2.0) + (Math.random() * 0.5);
+            var py = y - (settings.instanceRows / 2.0) + (Math.random() * 0.5);
             variant.offsets.push(vec3.fromValues(px, py, 0.0));
           }
         }
 
-        for(var i = 0; i < variantCount; ++i) {
+        for(var i = 0; i < settings.variantCount; ++i) {
           var variant = variants[i];
           var offsets = variant.offsets;
           var offsetArray = new Float32Array(offsets.length * 3);
@@ -130,11 +136,22 @@ THE SOFTWARE.
           gl.bindBuffer(gl.ARRAY_BUFFER, variant.offsetBuffer);
           gl.bufferData(gl.ARRAY_BUFFER, offsetArray, gl.STATIC_DRAW);
         }
+      }
+
+      model.load("media/models/main_player_lorez", function(model) {
+        resetInstances();
       });
       
       var anim = new SkeletalAnimation();
       var animationStart = 0;
       anim.load("media/animations/run_forward");
+
+      var settingsGui = new dat.GUI();
+      settingsGui.add(settings, 'useTransformFeedback');
+      settingsGui.add(settings, 'useInstancing');
+      settingsGui.add(settings, 'instanceRows').min(1).onFinishChange(resetInstances);
+      settingsGui.add(settings, 'instanceColumns').min(1).onFinishChange(resetInstances);
+      settingsGui.add(settings, 'variantCount', 1, 9).step(1).onFinishChange(resetInstances);
 
       function onAnimationFrame(t) {
         window.requestAnimationFrame(onAnimationFrame);
@@ -160,14 +177,15 @@ THE SOFTWARE.
             frameId = Math.floor(frameId);
 
             // Update the animations
+            var frameOffset = Math.floor(anim.frameCount / variants.length);
             for (var i = 0; i < variants.length; ++i) {
-              anim.evaluate((frameId + i*3) % anim.frameCount, variants[i].skeleton);
+              anim.evaluate((frameId + i*frameOffset) % anim.frameCount, variants[i].skeleton);
             }
           }
 
           var viewMat = this.camera.getViewMat();
 
-          if (skinMode == 1) {
+          if (settings.useTransformFeedback) {
             for (var i = 0; i < variants.length; ++i) {
               variants[i].bakedModel.bake(variants[i].skeleton);
             }
@@ -175,21 +193,21 @@ THE SOFTWARE.
 
           for (var i = 0; i < variants.length; ++i) {
             var variant = variants[i];
-            if (instanceMode == 1) {
+            if (settings.useInstancing) {
               mat4.identity(modelMat);
-              if (skinMode == 0) {
-                model.drawInstanced(modelMat, viewMat, projMat, variant.skeleton, variant.offsetBuffer, variant.offsets.length);
-              } else {
+              if (settings.useTransformFeedback) {
                 variant.bakedModel.drawInstanced(modelMat, viewMat, projMat, variant.offsetBuffer, variant.offsets.length);
+              } else {
+                model.drawInstanced(modelMat, viewMat, projMat, variant.skeleton, variant.offsetBuffer, variant.offsets.length);
               }
             } else {
               for (var j = 0; j < variant.offsets.length; ++j) {
                 mat4.identity(modelMat);
                 mat4.translate(modelMat, modelMat, variant.offsets[j]);
-                if (skinMode == 0) {
-                  model.draw(modelMat, viewMat, projMat, variant.skeleton);
-                } else {
+                if (settings.useTransformFeedback) {
                   variant.bakedModel.draw(modelMat, viewMat, projMat);
+                } else {
+                  model.draw(modelMat, viewMat, projMat, variant.skeleton);
                 }
               }
             }
