@@ -56,6 +56,7 @@ THE SOFTWARE.
       var AppSettings = function() {
         this.useTransformFeedback = WGLUUrl.getBool("useTransformFeedback", true);
         this.useInstancing = WGLUUrl.getBool("useInstancing", true);
+        this.useMatrixCaching = WGLUUrl.getBool("useMatrixCaching", true);
         this.instanceRows = WGLUUrl.getInt("instanceRows", 25);
         this.instanceColumns = WGLUUrl.getInt("instanceColumns", 25);
         this.variantCount = WGLUUrl.getInt("variantCount", 3);
@@ -64,6 +65,7 @@ THE SOFTWARE.
       var settings = new AppSettings();
 
       var stats = new Stats();
+      stats.setMode(1);
       document.body.appendChild( stats.domElement );
 
       var webglCanvas = document.getElementById("webgl-canvas");
@@ -151,7 +153,10 @@ THE SOFTWARE.
       settingsGui.add(settings, 'useInstancing');
       settingsGui.add(settings, 'instanceRows').min(1).onFinishChange(resetInstances);
       settingsGui.add(settings, 'instanceColumns').min(1).onFinishChange(resetInstances);
-      settingsGui.add(settings, 'variantCount', 1, 9).step(1).onFinishChange(resetInstances);
+      settingsGui.add(settings, 'variantCount', 1, 18).step(1).onFinishChange(resetInstances);
+      settingsGui.add(settings, 'useMatrixCaching').onFinishChange(() => {
+        anim.cacheTypedArrays = settings.useMatrixCaching;
+      });
 
       function onAnimationFrame(t) {
         window.requestAnimationFrame(onAnimationFrame);
@@ -194,7 +199,12 @@ THE SOFTWARE.
           for (var i = 0; i < variants.length; ++i) {
             var variant = variants[i];
             if (settings.useInstancing) {
-              mat4.identity(modelMat);
+              if (!settings.useMatrixCaching) {
+                modelMat = mat4.create();
+              } else {
+                mat4.identity(modelMat);
+              }
+              
               if (settings.useTransformFeedback) {
                 variant.bakedModel.drawInstanced(modelMat, viewMat, projMat, variant.offsetBuffer, variant.offsets.length);
               } else {
@@ -202,7 +212,11 @@ THE SOFTWARE.
               }
             } else {
               for (var j = 0; j < variant.offsets.length; ++j) {
-                mat4.identity(modelMat);
+                if (!settings.useMatrixCaching) {
+                  modelMat = mat4.create();
+                } else {
+                  mat4.identity(modelMat);
+                }
                 mat4.translate(modelMat, modelMat, variant.offsets[j]);
                 if (settings.useTransformFeedback) {
                   variant.bakedModel.draw(modelMat, viewMat, projMat);

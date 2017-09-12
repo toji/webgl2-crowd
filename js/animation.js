@@ -32,6 +32,7 @@ var SkeletalAnimation = (function () {
     this.bonesIds = {};
     this.keyframes = [];
     this.complete = false;
+    this.cacheTypedArrays = true;
   };
 
   Animation.prototype.load = function (url, callback) {
@@ -100,6 +101,11 @@ var SkeletalAnimation = (function () {
       if(bone.parent !== -1) {
         parent = bones[bone.parent];
 
+        if (!this.cacheTypedArrays) {
+          bone.worldPos = vec3.create();
+          bone.worldRot = quat.create();
+        }
+
         // Apply the parent transform to this bone
         vec3.transformQuat(bone.worldPos, bone.pos, parent.worldRot);
         vec3.add(bone.worldPos, bone.worldPos, parent.worldPos);
@@ -108,11 +114,15 @@ var SkeletalAnimation = (function () {
 
       // We only need to compute the matrices for bones that actually have vertices assigned to them
       if(bone.skinned) {
+        if (!this.cacheTypedArrays) {
+          bone.boneMat = mat4.create();
+        }
+
         mat4.fromRotationTranslation(bone.boneMat, bone.worldRot, bone.worldPos);
         mat4.multiply(bone.boneMat, bone.boneMat, bone.bindPoseMat);
       }
     }
-
+    
     skeleton._dirtyBones = true; // Notify the skeleton that it needs to update it's bone matrices
   };
 
